@@ -164,6 +164,8 @@ func handleConsume(conn net.Conn, server *Server) error {
 	if !ok {
 		server.mu.Unlock()
 		fmt.Fprintln(conn, "Topic not found.")
+		conn.Write([]byte("\n"))
+		fmt.Fprintln(conn, EndOfMessagesMarker)
 		return nil
 	}
 	server.mu.Unlock()

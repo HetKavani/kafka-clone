@@ -13,13 +13,15 @@ import (
 
 // Client represents the client application.
 type Client struct {
-	conn net.Conn
+	conn    net.Conn
+	scanner *bufio.Scanner
 }
 
 // NewClient creates a new Client instance.
 func NewClient(conn net.Conn) *Client {
 	return &Client{
-		conn: conn,
+		conn:    conn,
+		scanner: bufio.NewScanner(os.Stdin),
 	}
 }
 
@@ -30,11 +32,12 @@ func (c *Client) Run() {
 	printSuccess("Connected to server.")
 
 	for {
-		fmt.Print("Enter command (PUBLISH/CONSUME/EXIT): ")
-		var command string
-		_, err := fmt.Scanln(&command)
-		if err != nil {
-			printError("Error reading user input:", err)
+		printPrompt("Enter command (PUBLISH/CONSUME/EXIT): ")
+		if !c.scanner.Scan() {
+			break
+		}
+		command := strings.TrimSpace(c.scanner.Text())
+		if command == "" {
 			continue
 		}
 
@@ -54,38 +57,47 @@ func (c *Client) Run() {
 
 func (c *Client) publishMessage() {
 	printPrompt("Enter topic name: ")
-	var topicName string
-	_, err := fmt.Scanln(&topicName)
-	if err != nil {
-		printError("Error reading user input:", err)
+	if !c.scanner.Scan() {
+		return
+	}
+	topicName := strings.TrimSpace(c.scanner.Text())
+	if topicName == "" {
+		printError("Topic name cannot be empty.")
 		return
 	}
 
 	printPrompt("Enter message content: ")
-	var messageContent string
-	_, err = fmt.Scanln(&messageContent)
-	if err != nil {
-		printError("Error reading user input:", err)
+	if !c.scanner.Scan() {
 		return
 	}
+	messageContent := c.scanner.Text()
 
 	fmt.Fprintf(c.conn, "PUBLISH\n")
 	readServerPrompt(c.conn) // Read the "Enter topic name:" prompt from the server
 
 	fmt.Fprintf(c.conn, "%s\n", topicName)
-	readServerPrompt(c.conn) // Read the "Enter message content:" prompt from the server
+	prompt2 := readServerPrompt(c.conn) // Read prompt or error from the server
+
+	if prompt2 == "Invalid topic name." {
+		printError("Server error: Invalid topic name.")
+		return
+	}
 
 	fmt.Fprintf(c.conn, "%s\n", messageContent)
 
-	printSuccess("Server response: ", readServerPrompt(c.conn)) // Read the "Message published successfully." response
+	printSuccess("Server response: ", readServerPrompt(c.conn)) // Read response
 }
 
 func (c *Client) consumeMessages() {
 	printPrompt("Enter topic name: ")
-	var topicName string
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	topicName = scanner.Text()
+	if !c.scanner.Scan() {
+		return
+	}
+	topicName := strings.TrimSpace(c.scanner.Text())
+	if topicName == "" {
+		printError("Topic name cannot be empty.")
+		return
+	}
 
 	fmt.Fprintf(c.conn, "CONSUME\n")
 	readServerPrompt(c.conn) // Read the "Enter topic name:" prompt from the server
