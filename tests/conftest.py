@@ -51,6 +51,28 @@ class MockRedis:
         self.data[key] = str(val)
         return val
 
+    async def incrby(self, key: str, amount: int) -> int:
+        val = int(self.counters.get(key, 0)) + amount
+        self.counters[key] = val
+        self.data[key] = str(val)
+        return val
+
+    async def incrbyfloat(self, key: str, amount: float) -> float:
+        val = float(self.counters.get(key, 0.0)) + amount
+        self.counters[key] = val
+        self.data[key] = str(val)
+        return val
+
+    async def scan(self, cursor: int, match: str = None):
+        import fnmatch
+        matched = []
+        pattern = match or "*"
+        all_keys = set(list(self.data.keys()) + list(self.sets.keys()))
+        for k in all_keys:
+            if fnmatch.fnmatch(k, pattern):
+                matched.append(k)
+        return 0, matched
+
     async def sadd(self, key: str, value: str):
         if key not in self.sets:
             self.sets[key] = set()

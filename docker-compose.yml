@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kafkax
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kafkax_api
       - REDIS_URL=redis://redis:6379/0
       - HOST=api
       - PORT=8000
@@ -21,7 +21,7 @@ services:
     ports:
       - "8001:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kafkax
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kafkax_broker_1
       - REDIS_URL=redis://redis:6379/0
       - BROKER_ID=broker-1
       - HOST=broker-1
@@ -37,7 +37,7 @@ services:
     ports:
       - "8002:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kafkax
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kafkax_broker_2
       - REDIS_URL=redis://redis:6379/0
       - BROKER_ID=broker-2
       - HOST=broker-2
@@ -53,7 +53,7 @@ services:
     ports:
       - "8003:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kafkax
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kafkax_broker_3
       - REDIS_URL=redis://redis:6379/0
       - BROKER_ID=broker-3
       - HOST=broker-3

@@ -11,8 +11,8 @@ class EventPublishRequest(BaseModel):
     @field_validator("acks")
     @classmethod
     def validate_acks(cls, v: str) -> str:
-        if v not in ("none", "leader"):
-            raise ValueError("Acks must be either 'none' or 'leader'. 'all' is not supported yet.")
+        if v not in ("none", "leader", "all"):
+            raise ValueError("Acks must be either 'none', 'leader', or 'all'.")
         return v
 
 class EventPublishResponse(BaseModel):
@@ -32,3 +32,13 @@ class EventResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class EventReplicationRequest(BaseModel):
+    topic: str
+    partition: int
+    offset: int
+    key: Optional[str] = None
+    value: Any
+    timestamp: datetime
+    producer_id: Optional[str] = None
+

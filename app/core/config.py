@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     HOST: str = "localhost"
     PORT: int = 8000
 
+    CORS_ALLOWED_ORIGINS: list[str] = ["*"]
+    REPLICATION_FACTOR: int = 3
+    MAX_PAYLOAD_SIZE: int = 10485760  # 10MB
+
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

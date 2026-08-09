@@ -5,29 +5,41 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import engine, Base, async_session
+from app.core.database import engine, Base, async_session, ensure_postgres_db_exists
 from app.core.redis import redis_manager
 from app.api.v1.router import api_router
-from app.services.cluster import broker_heartbeat_loop, cluster_monitor_loop
+from app.services.cluster import broker_heartbeat_loop, cluster_monitor_loop, broker_replica_recovery_loop
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup actions
-    # 1. Automatically create PostgreSQL tables if they don't exist and run self-healing migration
+    # 1. Ensure the PostgreSQL database exists
+    await ensure_postgres_db_exists(settings.DATABASE_URL)
+
+    # 2. Automatically create PostgreSQL tables if they don't exist and run self-healing migration
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         try:
             await conn.execute(text("ALTER TABLE partitions ADD COLUMN broker_id VARCHAR(255)"))
         except Exception:
             pass
+        try:
+            await conn.execute(text("ALTER TABLE partitions ADD COLUMN replicas JSON"))
+        except Exception:
+            pass
+        try:
+            await conn.execute(text("ALTER TABLE partitions ADD COLUMN isr JSON"))
+        except Exception:
+            pass
 
-    # 2. Setup Redis Connection Pool
+    # 3. Setup Redis Connection Pool
     redis_manager.connect()
 
-    # 3. Start background tasks for cluster management
+    # 4. Start background tasks for cluster management
     app.state.bg_tasks = []
     if settings.BROKER_ID:
         app.state.bg_tasks.append(asyncio.create_task(broker_heartbeat_loop(redis_manager.client)))
+        app.state.bg_tasks.append(asyncio.create_task(broker_replica_recovery_loop(redis_manager.client, async_session)))
     app.state.bg_tasks.append(asyncio.create_task(cluster_monitor_loop(redis_manager.client, async_session)))
 
     yield
@@ -53,11 +65,12 @@ app = FastAPI(
 # Set CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Mount API v1 router
 app.include_router(api_router, prefix=settings.API_V1_STR)

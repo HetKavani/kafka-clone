@@ -100,3 +100,69 @@ class EventRepository:
         result = await self.db.execute(stmt)
         val = result.scalar_one_or_none()
         return val if val is not None else 0
+
+    async def replicate_event(
+        self,
+        topic_name: str,
+        partition_number: int,
+        offset: int,
+        key: Optional[str],
+        value: any,
+        timestamp: datetime,
+        producer_id: Optional[str] = None
+    ) -> Event:
+        # Ensure the topic exists locally
+        stmt_topic = select(Topic).where(Topic.name == topic_name)
+        topic_result = await self.db.execute(stmt_topic)
+        topic = topic_result.scalar_one_or_none()
+        if not topic:
+            topic = Topic(name=topic_name, partition_count=partition_number + 1)
+            self.db.add(topic)
+            await self.db.flush()
+            for i in range(partition_number + 1):
+                part = Partition(topic_id=topic.id, partition_number=i, next_offset=0)
+                self.db.add(part)
+            await self.db.flush()
+
+        # Ensure partition exists locally
+        stmt_part = select(Partition).where(
+            Partition.topic_id == topic.id,
+            Partition.partition_number == partition_number
+        ).with_for_update()
+        part_result = await self.db.execute(stmt_part)
+        partition = part_result.scalar_one_or_none()
+        if not partition:
+            partition = Partition(topic_id=topic.id, partition_number=partition_number, next_offset=0)
+            self.db.add(partition)
+            await self.db.flush()
+
+        # Check if event already exists (idempotency)
+        stmt_evt = select(Event).where(
+            Event.topic == topic_name,
+            Event.partition == partition_number,
+            Event.offset == offset
+        )
+        evt_result = await self.db.execute(stmt_evt)
+        existing_event = evt_result.scalar_one_or_none()
+        if existing_event:
+            return existing_event
+
+        # Create replicated event
+        event = Event(
+            topic=topic_name,
+            partition=partition_number,
+            offset=offset,
+            key=key,
+            value=value,
+            timestamp=timestamp,
+            producer_id=producer_id
+        )
+        self.db.add(event)
+
+        # Update local next_offset
+        if offset >= partition.next_offset:
+            partition.next_offset = offset + 1
+
+        await self.db.commit()
+        return event
+

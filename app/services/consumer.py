@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
+import redis.asyncio as aioredis
 
 from app.repositories.event import EventRepository
 from app.repositories.topic import TopicRepository
@@ -12,8 +13,9 @@ from app.models import Event, ConsumerOffset
 logger = logging.getLogger("kafkax")
 
 class ConsumerService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, redis_client: Optional[aioredis.Redis] = None):
         self.db = db
+        self.redis = redis_client
         self.event_repo = EventRepository(db)
         self.topic_repo = TopicRepository(db)
         self.offset_repo = OffsetRepository(db)
@@ -28,6 +30,7 @@ class ConsumerService:
         timestamp: Optional[datetime] = None,
         limit: int = 100
     ) -> List[Event]:
+        start_time = datetime.utcnow()
         topic = await self.topic_repo.get_by_name(topic_name)
         if not topic:
             raise ValueError(f"Topic '{topic_name}' not found")
@@ -39,7 +42,6 @@ class ConsumerService:
             start_offset = 0
             
         elif strategy == "latest":
-            # Fetch the next offset from partitions table
             start_offset = await self.event_repo.get_partition_offset(topic.id, partition)
             
         elif strategy == "specific":
@@ -50,12 +52,20 @@ class ConsumerService:
         elif strategy == "committed":
             if not group_id:
                 raise ValueError("Group ID must be specified when using 'committed' strategy")
-            committed = await self.offset_repo.get(group_id, topic_name, partition)
-            if committed:
-                start_offset = committed.committed_offset
-            else:
-                # Fallback to earliest if no offset has been committed yet
-                start_offset = 0
+            
+            offset_val = None
+            if self.redis:
+                redis_offset_str = await self.redis.get(f"kafkax:group:{group_id}:offset:{topic_name}:{partition}")
+                if redis_offset_str is not None:
+                    offset_val = int(redis_offset_str)
+
+            if offset_val is None:
+                committed = await self.offset_repo.get(group_id, topic_name, partition)
+                if committed:
+                    offset_val = committed.committed_offset
+                else:
+                    offset_val = 0
+            start_offset = offset_val
                 
         elif strategy == "timestamp":
             if not timestamp:
@@ -87,10 +97,24 @@ class ConsumerService:
                     "group_id": group_id
                 }))
 
+        # Track metrics
+        duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+        if self.redis and events:
+            await self.redis.incrby("kafkax:metrics:events_consumed", len(events))
+            await self.redis.incr("kafkax:metrics:consume_count")
+            await self.redis.incrbyfloat("kafkax:metrics:consume_time_ms", duration_ms)
+
         return events
 
     async def commit_offset(self, group_id: str, topic: str, partition: int, offset: int) -> ConsumerOffset:
-        return await self.offset_repo.commit(group_id, topic, partition, offset)
+        # Commit to DB
+        db_offset = await self.offset_repo.commit(group_id, topic, partition, offset)
+        # Commit to Redis
+        if self.redis:
+            await self.redis.set(f"kafkax:group:{group_id}:offset:{topic}:{partition}", str(offset))
+            await self.redis.sadd("kafkax:groups", group_id)
+        return db_offset
 
     async def get_committed_offsets(self, group_id: str) -> List[ConsumerOffset]:
         return await self.offset_repo.list_by_group(group_id)
+

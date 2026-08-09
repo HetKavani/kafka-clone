@@ -1,4 +1,5 @@
 import httpx
+import json
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,16 @@ async def publish_event(
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
+    # Enforce payload size limit
+    val_str = json.dumps(req.value)
+    if len(val_str.encode("utf-8")) > settings.MAX_PAYLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Payload size limit exceeded"
+        )
+
     service = ProducerService(db, redis_client)
+
     try:
         if not routed:
             # Resolve topic
